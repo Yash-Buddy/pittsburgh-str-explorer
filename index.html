@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pittsburgh Short-Term Rental Data Exploration</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  #map { height: 520px; border-radius: 6px; }
+  .uncertain-note { display: flex; align-items: center; gap: 6px; }
+  .ring { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed #999; display: inline-block; }
+  :root {
+    --ink: #14151a;
+    --bg: #fafaf8;
+    --muted: #6b6d76;
+    --line: #e3e3e0;
+    --accent: #7c3aed;
+    --accent2: #059669;
+    --accent3: #d97706;
+    --accent4: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  header {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 56px 24px 24px;
+  }
+  h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--muted); font-size: 14px; max-width: 640px; }
+  .stats {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+  .stat { min-width: 110px; }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+
+  main { max-width: 880px; margin: 0 auto; padding: 0 24px 80px; }
+  section { margin-top: 56px; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  .q { color: var(--muted); font-size: 13px; margin: 0 0 20px; max-width: 620px; }
+  .chart-wrap { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+  .bar { transition: opacity 0.15s; }
+  .bar:hover { opacity: 0.75; }
+  .axis text { fill: var(--muted); font-size: 11px; }
+  .axis path, .axis line { stroke: var(--line); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .tooltip {
+    position: absolute;
+    background: var(--ink);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+    z-index: 10;
+  }
+  .note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    border-top: 1px dashed var(--line);
+    padding-top: 10px;
+  }
+  footer { max-width: 880px; margin: 0 auto; padding: 0 24px 60px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pittsburgh Short-Term Rental Data Exploration</h1>
+  <p class="subtitle">
+    A hand-checked, listing-level census of short-term rentals across four City of Pittsburgh
+    neighbourhoods — Lower, Central and Upper Lawrenceville, and Bloomfield — compiled while
+    Council Bill 2026-0009 (the short-term rental zoning bill) was pending.
+  </p>
+  <div class="stats" id="stats"></div>
+</header>
+
+<main>
+  <section id="s0">
+    <h2>0. Where exactly is every listing?</h2>
+    <p class="q">Real City of Pittsburgh neighbourhood boundaries, shaded by live listing count (darker = more listings), with every listing plotted on top at its actual coordinates. 63 of the 273 live Airbnb rows are flagged as materially uncertain about which side of a neighbourhood boundary they fall on — shown here with a dashed ring, per the source dataset's own caveat.</p>
+    <div class="chart-wrap"><div id="map"></div></div>
+    <div class="legend" id="map-legend"></div>
+    <p class="note">Coordinates are platform-displaced by roughly 150m, per the source dataset's own caveat — treat exact pin positions as approximate, not precise addresses. Delisted rows are excluded; hotel-style rooms are included and marked distinctly. Neighbourhood boundaries: City of Pittsburgh Neighborhoods layer, via WPRDC / ArcGIS Hub, fetched live in your browser.</p>
+  </section>
+
+  <section id="s1">
+    <h2>1. Where are listings concentrated?</h2>
+    <p class="q">How do Airbnb listings distribute across the four neighbourhoods?</p>
+    <div class="chart-wrap"><svg id="chart1"></svg></div>
+    <p class="note">Excludes 2 delisted rows. Includes 8 hotel-style listings, shown as a separate segment — they are not dwelling units.</p>
+  </section>
+
+  <section id="s2">
+    <h2>2. How do rates differ by neighbourhood and season?</h2>
+    <p class="q">Median observed 2-night, 2-guest stay totals across three date windows: a mid-September weekday stay, a late-September weekend, and a December weekend.</p>
+    <div class="chart-wrap"><svg id="chart2"></svg></div>
+    <p class="note">Rates are stay totals, not nightly rates, and are never averaged across windows — each bar is an independent median for that specific date window, computed only from listings with a value for it.</p>
+  </section>
+
+  <section id="s3">
+    <h2>3. What types of listings are there?</h2>
+    <p class="q">The mix of room types and guest capacities across the live census.</p>
+    <div class="chart-wrap"><svg id="chart3"></svg></div>
+  </section>
+
+  <section id="s4">
+    <h2>4. How concentrated is hosting?</h2>
+    <p class="q">How many in-scope listings do individual hosts operate?</p>
+    <div class="chart-wrap"><svg id="chart4"></svg></div>
+    <p class="note">A host with many listings is not necessarily doing anything wrong — some may be legitimate small property managers — but concentration is relevant context for the zoning discussion.</p>
+  </section>
+</main>
+
+<footer>
+  Data: VanToVault Pittsburgh Short-Term Rental Census, CC BY 4.0. As of 2026-08-31.
+  Method: <a href="https://vantovault.com/library/pittsburgh-short-term-rental-census/">vantovault.com</a>.
+  This is an experimental exploration project, not a policy or legal analysis.
+</footer>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const NEIGHBORHOODS = ["Lower Lawrenceville", "Central Lawrenceville", "Upper Lawrenceville", "Bloomfield"];
+const COLORS = { housing: "#7c3aed", hotel: "#d97706" };
+const tooltip = d3.select("#tooltip");
+
+function showTip(html, event) {
+  tooltip.style("opacity", 1)
+    .html(html)
+    .style("left", (event.pageX + 12) + "px")
+    .style("top", (event.pageY - 24) + "px");
+}
+function hideTip() { tooltip.style("opacity", 0); }
+
+d3.csv("data/vantovault-pittsburgh-str-census-airbnb.csv").then(raw => {
+  const live = raw.filter(d => !d.delisted_by);
+  const hotel = live.filter(d => d.room_type === "Hotel room");
+  const housing = live.filter(d => d.room_type !== "Hotel room");
+
+  // --- header stats ---
+  const stats = [
+    { v: live.length, l: "Live listings" },
+    { v: housing.length, l: "Dwelling units" },
+    { v: hotel.length, l: "Hotel-style rooms" },
+    { v: NEIGHBORHOODS.length, l: "Neighbourhoods" },
+  ];
+  d3.select("#stats").selectAll(".stat").data(stats).enter().append("div")
+    .attr("class", "stat")
+    .html(d => `<b>${d.v}</b><span>${d.l}</span>`);
+
+  // ---------- Chart 0: geo map (choropleth boundaries + points) ----------
+  (function () {
+    const hoodColor = {
+      "Lower Lawrenceville": "#2563eb",
+      "Central Lawrenceville": "#059669",
+      "Upper Lawrenceville": "#7c3aed",
+      "Bloomfield": "#d97706",
+    };
+
+    const validPoints = live.filter(d => d.lat && d.lng && !isNaN(+d.lat) && !isNaN(+d.lng));
+    const avgLat = d3.mean(validPoints, d => +d.lat);
+    const avgLng = d3.mean(validPoints, d => +d.lng);
+
+    const map = L.map("map").setView([avgLat || 40.468, avgLng || -79.961], 14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Listing counts per neighbourhood drive the choropleth fill intensity
+    const countByHood = {};
+    NEIGHBORHOODS.forEach(h => { countByHood[h] = live.filter(d => d.neighborhood === h).length; });
+    const maxCount = d3.max(Object.values(countByHood));
+
+    // Real neighbourhood boundary polygons, from the City of Pittsburgh's
+    // official Neighborhoods layer (WPRDC / ArcGIS Hub), fetched at load time.
+    const BOUNDARY_QUERY_URL =
+      "https://services1.arcgis.com/YZCmUqbcsUpOKfj7/arcgis/rest/services/PGH_Neighborhoods_SNAP_OD/FeatureServer/0/query" +
+      "?where=" + encodeURIComponent("HOOD IN ('Lower Lawrenceville','Central Lawrenceville','Upper Lawrenceville','Bloomfield')") +
+      "&outFields=HOOD&outSR=4326&f=geojson";
+
+    fetch(BOUNDARY_QUERY_URL)
+      .then(r => r.json())
+      .then(geojson => {
+        L.geoJSON(geojson, {
+          style: feature => {
+            const hood = feature.properties.HOOD;
+            const count = countByHood[hood] || 0;
+            const intensity = maxCount ? count / maxCount : 0;
+            return {
+              color: hoodColor[hood] || "#888",
+              weight: 1.5,
+              fillColor: hoodColor[hood] || "#888",
+              fillOpacity: 0.15 + intensity * 0.35,
+            };
+          },
+          onEachFeature: (feature, layer) => {
+            const hood = feature.properties.HOOD;
+            layer.on("mousemove", e => showTip(`<b>${hood}</b><br>${countByHood[hood] || 0} live listings`, e));
+            layer.on("mouseleave", hideTip);
+          },
+        }).addTo(map);
+      })
+      .catch(err => {
+        console.warn("Could not load neighbourhood boundaries — showing points only.", err);
+      });
+
+    validPoints.forEach(d => {
+      const color = hoodColor[d.neighborhood] || "#888";
+      const isHotel = d.room_type === "Hotel room";
+      const uncertain = d.boundary_uncertain_material === "yes";
+
+      const marker = L.circleMarker([+d.lat, +d.lng], {
+        radius: isHotel ? 5 : 6,
+        color: uncertain ? "#333" : "#fff",
+        weight: uncertain ? 2 : 1,
+        dashArray: uncertain ? "3,2" : null,
+        fillColor: color,
+        fillOpacity: isHotel ? 0.45 : 0.9,
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <b>${d.neighborhood}</b><br>
+        ${d.room_type}${isHotel ? " (not a dwelling unit)" : ""}<br>
+        Capacity: ${d.capacity_guests} guests<br>
+        ${d.star_rating ? "Rating: " + d.star_rating + " (" + d.review_count + " reviews)" : "No reviews yet"}
+        ${uncertain ? "<br><i>Boundary-uncertain: nearest alt. " + d.nearest_other_neighborhood + "</i>" : ""}
+      `);
+    });
+
+    const legendHtml = Object.entries(hoodColor).map(([hood, c]) =>
+      `<div class="legend-item"><span class="swatch" style="background:${c}"></span>${hood} (${countByHood[hood] || 0})</div>`
+    ).join("") + `<div class="legend-item uncertain-note"><span class="ring"></span>Boundary-uncertain (material)</div>`;
+    document.getElementById("map-legend").innerHTML = legendHtml;
+  })();
+
+  // ---------- Chart 1: listings by neighbourhood, housing vs hotel ----------
+  (function () {
+    const byHood = NEIGHBORHOODS.map(hood => ({
+      hood,
+      housing: housing.filter(d => d.neighborhood === hood).length,
+      hotel: hotel.filter(d => d.neighborhood === hood).length,
+    }));
+
+    const margin = { top: 10, right: 20, bottom: 40, left: 40 };
+    const width = 800, height = 280;
+    const svg = d3.select("#chart1").attr("viewBox", `0 0 ${width} ${height}`);
+    const x = d3.scaleBand().domain(NEIGHBORHOODS).range([margin.left, width - margin.right]).padding(0.35);
+    const y = d3.scaleLinear().domain([0, d3.max(byHood, d => d.housing + d.hotel)]).nice().range([height - margin.bottom, margin.top]);
+
+    svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x));
+    svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+
+    const g = svg.selectAll(".hood-group").data(byHood).enter().append("g");
+    g.append("rect").attr("class", "bar")
+      .attr("x", d => x(d.hood)).attr("width", x.bandwidth())
+      .attr("y", d => y(d.housing)).attr("height", d => y(0) - y(d.housing))
+      .attr("fill", COLORS.housing)
+      .on("mousemove", (e, d) => showTip(`<b>${d.hood}</b><br>${d.housing} dwelling units`, e))
+      .on("mouseleave", hideTip);
+    g.append("rect").attr("class", "bar")
+      .attr("x", d => x(d.hood)).attr("width", x.bandwidth())
+      .attr("y", d => y(d.housing + d.hotel)).attr("height", d => y(d.housing) - y(d.housing + d.hotel))
+      .attr("fill", COLORS.hotel)
+      .on("mousemove", (e, d) => showTip(`<b>${d.hood}</b><br>${d.hotel} hotel-style rooms`, e))
+      .on("mouseleave", hideTip);
+
+    d3.select("#s1 .chart-wrap").append("div").attr("class", "legend").html(`
+      <div class="legend-item"><span class="swatch" style="background:${COLORS.housing}"></span>Dwelling units</div>
+      <div class="legend-item"><span class="swatch" style="background:${COLORS.hotel}"></span>Hotel-style rooms</div>
+    `);
+  })();
+
+  // ---------- Chart 2: median rate by neighbourhood x window ----------
+  (function () {
+    const windows = [
+      { key: "rate_2night_total_2026-09-15_17_usd", label: "Mid-Sep (weekday)", color: "#2563eb" },
+      { key: "rate_2night_total_2026-09-25_27_usd", label: "Late-Sep (weekend)", color: "#059669" },
+      { key: "rate_2night_total_2026-12-11_13_usd", label: "December (weekend)", color: "#d97706" },
+    ];
+    const data = [];
+    NEIGHBORHOODS.forEach(hood => {
+      windows.forEach(w => {
+        const vals = live.filter(d => d.neighborhood === hood && d[w.key] !== "").map(d => +d[w.key]);
+        data.push({ hood, window: w.label, color: w.color, median: vals.length ? d3.median(vals) : null, n: vals.length });
+      });
+    });
+
+    const margin = { top: 10, right: 20, bottom: 40, left: 50 };
+    const width = 800, height = 300;
+    const svg = d3.select("#chart2").attr("viewBox", `0 0 ${width} ${height}`);
+    const x0 = d3.scaleBand().domain(NEIGHBORHOODS).range([margin.left, width - margin.right]).padding(0.25);
+    const x1 = d3.scaleBand().domain(windows.map(w => w.label)).range([0, x0.bandwidth()]).padding(0.12);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.median || 0)]).nice().range([height - margin.bottom, margin.top]);
+
+    svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x0));
+    svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d => "$" + d));
+
+    const hoodGroups = svg.selectAll(".hoodg").data(NEIGHBORHOODS).enter().append("g")
+      .attr("transform", hood => `translate(${x0(hood)},0)`);
+
+    hoodGroups.each(function (hood) {
+      const rows = data.filter(d => d.hood === hood && d.median !== null);
+      d3.select(this).selectAll("rect").data(rows).enter().append("rect")
+        .attr("class", "bar")
+        .attr("x", d => x1(d.window))
+        .attr("width", x1.bandwidth())
+        .attr("y", d => y(d.median))
+        .attr("height", d => y(0) - y(d.median))
+        .attr("fill", d => d.color)
+        .on("mousemove", (e, d) => showTip(`<b>${d.hood}</b><br>${d.window}<br>$${d.median} median (n=${d.n})`, e))
+        .on("mouseleave", hideTip);
+    });
+
+    d3.select("#s2 .chart-wrap").append("div").attr("class", "legend").html(
+      windows.map(w => `<div class="legend-item"><span class="swatch" style="background:${w.color}"></span>${w.label}</div>`).join("")
+    );
+  })();
+
+  // ---------- Chart 3: room type mix ----------
+  (function () {
+    const types = Array.from(d3.rollup(live, v => v.length, d => d.room_type || "Unknown"), ([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+    const margin = { top: 10, right: 30, bottom: 30, left: 140 };
+    const width = 800, height = 220;
+    const svg = d3.select("#chart3").attr("viewBox", `0 0 ${width} ${height}`);
+    const y = d3.scaleBand().domain(types.map(d => d.type)).range([margin.top, height - margin.bottom]).padding(0.3);
+    const x = d3.scaleLinear().domain([0, d3.max(types, d => d.count)]).nice().range([margin.left, width - margin.right]);
+
+    svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5));
+    svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y));
+
+    svg.selectAll(".bar").data(types).enter().append("rect")
+      .attr("class", "bar")
+      .attr("y", d => y(d.type)).attr("height", y.bandwidth())
+      .attr("x", margin.left).attr("width", d => x(d.count) - margin.left)
+      .attr("fill", "#7c3aed")
+      .on("mousemove", (e, d) => showTip(`<b>${d.type}</b><br>${d.count} listings`, e))
+      .on("mouseleave", hideTip);
+  })();
+
+  // ---------- Chart 4: host concentration ----------
+  (function () {
+    const buckets = new Map([["1", 0], ["2", 0], ["3-5", 0], ["6+", 0]]);
+    const seenHosts = new Set();
+    live.forEach(d => {
+      if (seenHosts.has(d.host_id)) return;
+      seenHosts.add(d.host_id);
+      const n = +d.host_inscope_listings;
+      const key = n === 1 ? "1" : n === 2 ? "2" : n <= 5 ? "3-5" : "6+";
+      buckets.set(key, buckets.get(key) + 1);
+    });
+    const data = Array.from(buckets, ([bucket, hosts]) => ({ bucket, hosts }));
+
+    const margin = { top: 10, right: 20, bottom: 40, left: 40 };
+    const width = 800, height = 240;
+    const svg = d3.select("#chart4").attr("viewBox", `0 0 ${width} ${height}`);
+    const x = d3.scaleBand().domain(data.map(d => d.bucket)).range([margin.left, width - margin.right]).padding(0.35);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.hosts)]).nice().range([height - margin.bottom, margin.top]);
+
+    svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x));
+    svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+
+    svg.selectAll(".bar").data(data).enter().append("rect")
+      .attr("class", "bar")
+      .attr("x", d => x(d.bucket)).attr("width", x.bandwidth())
+      .attr("y", d => y(d.hosts)).attr("height", d => y(0) - y(d.hosts))
+      .attr("fill", "#059669")
+      .on("mousemove", (e, d) => showTip(`<b>${d.hosts}</b> hosts operate <b>${d.bucket}</b> in-scope listing(s)`, e))
+      .on("mouseleave", hideTip);
+  })();
+
+}).catch(err => {
+  d3.select("main").insert("p", ":first-child")
+    .style("color", "#b91c1c")
+    .text("Could not load data/vantovault-pittsburgh-str-census-airbnb.csv — make sure this file sits alongside index.html in the repo's data/ folder.");
+  console.error(err);
+});
+</script>
+
+</body>
+</html>
